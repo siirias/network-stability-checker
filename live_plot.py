@@ -1,38 +1,35 @@
 #!/usr/bin/env python3
 """
-live_plot.py — Live ping visualizer for net_watch / ping_logger CSVs.
+live_plot.py — Live ping visualizer with RTT + loss strip.
 
 - Reads CSVs from ./data/
-- Uses the newest files automatically
-- Plots last N minutes of ping RTT
-- Refreshes periodically
+- Uses newest files automatically
+- Plots last N minutes
+- RTT plot (capped)
+- Packet-loss intensity strip underneath
 """
 
 import argparse
 import time
 from pathlib import Path
-from datetime import timedelta
 
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import numpy as np
 
 
 DATA_DIR = Path(__file__).parent / "data"
 
 
 def load_recent_data(minutes: int) -> pd.DataFrame:
-    if not DATA_DIR.exists():
-        raise FileNotFoundError(f"Data directory not found: {DATA_DIR}")
-
     files = sorted(DATA_DIR.glob("net_watch_*.csv"))
     if not files:
         return pd.DataFrame()
 
     cutoff = pd.Timestamp.utcnow() - pd.Timedelta(minutes=minutes)
-
     dfs = []
-    # Walk newest → older until we have enough time coverage
+
     for fn in reversed(files):
         try:
             df = pd.read_csv(fn, parse_dates=["ts_utc"])
@@ -51,53 +48,85 @@ def load_recent_data(minutes: int) -> pd.DataFrame:
     if not dfs:
         return pd.DataFrame()
 
-    out = pd.concat(dfs, ignore_index=True)
-    return out.sort_values("ts_utc")
+    return pd.concat(dfs, ignore_index=True).sort_values("ts_utc")
 
 
-def plot_loop(minutes: int, refresh: float):
+def plot_loop(minutes: int, refresh: float, rtt_cap: float, loss_bin_s: int):
     plt.ion()
-    fig, ax = plt.subplots(figsize=(12, 5))
+    fig, (ax_rtt, ax_loss) = plt.subplots(
+        2, 1, figsize=(12, 6),
+        sharex=True,
+        gridspec_kw={"height_ratios": [4, 1]}
+    )
 
     while True:
-        ax.clear()
+        ax_rtt.clear()
+        ax_loss.clear()
 
         df = load_recent_data(minutes)
 
         if df.empty:
-            ax.set_title("No data yet")
+            ax_rtt.set_title("No data yet")
+            plt.pause(0.01)
             time.sleep(refresh)
             continue
 
+        # --- RTT plot ---
         for target, g in df.groupby("target"):
             ok = g["ok"] == 1
-            ax.plot(
+            rtt = g.loc[ok, "value_ms"].clip(upper=rtt_cap)
+
+            ax_rtt.plot(
                 g.loc[ok, "ts_utc"],
-                g.loc[ok, "value_ms"],
+                rtt,
                 marker=".",
                 linestyle="-",
                 label=target,
             )
 
-            # Mark timeouts
-            ax.scatter(
-                g.loc[~ok, "ts_utc"],
-                [0] * (~ok).sum(),
-                marker="x",
-                alpha=0.6,
-            )
+        ax_rtt.set_ylim(0, rtt_cap)
+        ax_rtt.set_ylabel("RTT (ms)")
+        ax_rtt.set_title(f"Ping RTT (capped at {rtt_cap:.0f} ms) — last {minutes} min")
+        ax_rtt.grid(True, alpha=0.3)
+        ax_rtt.legend(loc="upper right")
 
-        ax.set_ylim(bottom=0)
-        ax.set_ylabel("RTT (ms)")
-        ax.set_xlabel("UTC time")
-        ax.set_title(f"Ping RTT — last {minutes} minutes")
+        # --- Packet loss strip ---
+        df_loss = df.copy()
+        df_loss["fail"] = (df_loss["ok"] == 0).astype(int)
 
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
+        # Bin in time
+        df_loss["bin"] = df_loss["ts_utc"].dt.floor(f"{loss_bin_s}s")
+        loss_rate = (
+            df_loss.groupby("bin")["fail"]
+            .mean()        # fraction failed
+            .reset_index()
+        )
+
+        # Build image-like array
+        times = loss_rate["bin"]
+        values = loss_rate["fail"].values.reshape(1, -1)
+
+        ax_loss.imshow(
+            values,
+            aspect="auto",
+            cmap="gray_r",
+            extent=[
+                mdates.date2num(times.min()),
+                mdates.date2num(times.max()),
+                0, 1,
+            ],
+            vmin=0,
+            vmax=1,
+        )
+
+        ax_loss.set_yticks([])
+        ax_loss.set_ylabel("loss")
+        ax_loss.set_xlabel("UTC time")
+
+        ax_loss.set_title(f"Packet loss intensity (bin = {loss_bin_s}s)")
+        ax_loss.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
+
         fig.autofmt_xdate()
-
-        ax.legend(loc="upper right")
-        ax.grid(True, alpha=0.3)
-
         plt.pause(0.01)
         time.sleep(refresh)
 
@@ -106,11 +135,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--minutes", type=int, default=60, help="Time window (minutes)")
     ap.add_argument("--refresh", type=float, default=5.0, help="Refresh interval (seconds)")
+    ap.add_argument("--rtt-cap", type=float, default=250.0, help="Max RTT shown (ms)")
+    ap.add_argument("--loss-bin", type=int, default=5, help="Loss bin size (seconds)")
     args = ap.parse_args()
 
-    plot_loop(args.minutes, args.refresh)
+    plot_loop(args.minutes, args.refresh, args.rtt_cap, args.loss_bin)
 
 
 if __name__ == "__main__":
     main()
-
