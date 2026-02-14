@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.patches import Patch
 from typing import Optional
+from matplotlib.colors import ListedColormap, BoundaryNorm
 
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -25,6 +26,33 @@ REPORT_DIR = Path(__file__).parent / "report"
 RTT_CAP = 250.0  # ms
 LOSS_BIN_S = 5   # seconds
 
+def build_loss_colormap():
+    """
+    Discrete 10-step loss colormap:
+    green -> yellow -> red
+    with white for missing data.
+    """
+
+    colors = [
+        "#d9f0d3",  # 0.0–0.1  light green
+        "#a6d96a",
+        "#66bd63",
+        "#1a9850",
+        "#fee08b",  # mid (yellowish)
+        "#fdae61",
+        "#f46d43",
+        "#d73027",
+        "#a50026",
+        "#67000d",  # worst (dark red)
+    ]
+
+    cmap = ListedColormap(colors)
+    cmap.set_bad(color="white")  # for missing data
+
+    bounds = np.linspace(0, 1, 11)   # 0.0 ... 1.0 in 0.1 steps
+    norm = BoundaryNorm(bounds, cmap.N)
+
+    return cmap, norm
 
 # -----------------------------
 # Data loading
@@ -177,7 +205,8 @@ def plot_loss_heatmap(df: pd.DataFrame):
     data_masked = np.ma.masked_invalid(data)
 
     # Custom colormap: bad → good
-    cmap = plt.cm.get_cmap("viridis_r").copy()
+    cmap, norm = build_loss_colormap()
+#    cmap = plt.cm.get_cmap("viridis_r").copy()
     cmap.set_bad(color="white")  # no data
 
     fig, ax = plt.subplots(figsize=(12, 6))
@@ -187,7 +216,7 @@ def plot_loss_heatmap(df: pd.DataFrame):
         aspect="auto",
         cmap=cmap,
         vmin=0,
-        vmax=1,
+        vmax=0.5,
         interpolation="nearest",
     )
 
@@ -322,6 +351,34 @@ def plot_events(df: pd.DataFrame):
     fig.savefig(REPORT_DIR / "event_timeline.png", dpi=150)
     plt.close(fig)
 
+# -----------------------------
+# Figure 5: average loss by hour (all days)
+# -----------------------------
+def plot_loss_by_hour(df: pd.DataFrame):
+    if df.empty:
+        return
+
+    d = df.copy()
+    d["hour"] = d["ts_utc"].dt.hour
+    d["fail"] = (d["ok"] == 0).astype(int)
+
+    # Mean loss fraction per hour across all days
+    loss = d.groupby("hour")["fail"].mean()
+
+    fig, ax = plt.subplots(figsize=(12, 4))
+
+    ax.bar(loss.index, loss.values * 100)
+
+    ax.set_xlabel("Hour of day (UTC)")
+    ax.set_ylabel("Packet loss (%)")
+    ax.set_title("Average packet loss by hour of day")
+
+    ax.set_xticks(range(24))
+    ax.grid(True, axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    fig.savefig(REPORT_DIR / "loss_by_hour.png", dpi=150)
+    plt.close(fig)
 
 # -----------------------------
 # Main
@@ -341,6 +398,7 @@ def main():
     plot_diurnal(df)
     plot_loss_heatmap(df)
     plot_events(df)
+    plot_loss_by_hour(df)
 
     print(f"Plots written to {REPORT_DIR.resolve()}")
 
