@@ -1,0 +1,35 @@
+Ignore runtime data
+
+data/ report/
+
+Python cache
+
+pycache/ .pyc .pyo *.pyd
+
+Virtual environments
+
+.venv/ venv/ env/ ENV/
+
+Conda environments (optional, if local)
+
+.conda/ conda-env/
+
+OS / editor junk
+
+.DS_Store Thumbs.db .swp .swo *~
+
+Logs
+
+*.log
+
+Temporary files
+
+.tmp .bak
+
+Jupyter checkpoints
+
+.ipynb_checkpoints/
+
+Matplotlib cache
+
+.matplotlib/
