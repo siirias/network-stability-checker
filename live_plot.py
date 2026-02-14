@@ -90,41 +90,38 @@ def plot_loop(minutes: int, refresh: float, rtt_cap: float, loss_bin_s: int):
         ax_rtt.grid(True, alpha=0.3)
         ax_rtt.legend(loc="upper right")
 
-        # --- Packet loss strip ---
+        # --- Packet loss strip (fixed) ---
         df_loss = df.copy()
         df_loss["fail"] = (df_loss["ok"] == 0).astype(int)
 
-        # Bin in time
         df_loss["bin"] = df_loss["ts_utc"].dt.floor(f"{loss_bin_s}s")
         loss_rate = (
             df_loss.groupby("bin")["fail"]
-            .mean()        # fraction failed
-            .reset_index()
+            .mean()
+            .sort_index()
         )
 
-        # Build image-like array
-        times = loss_rate["bin"]
-        values = loss_rate["fail"].values.reshape(1, -1)
+        for t, frac in loss_rate.items():
+            if frac > 0:
+                ax_loss.axvspan(
+                    t,
+                    t + pd.Timedelta(seconds=loss_bin_s),
+                    color="black",
+                    alpha=float(frac),
+                    linewidth=0,
+                )
 
-        ax_loss.imshow(
-            values,
-            aspect="auto",
-            cmap="gray_r",
-            extent=[
-                mdates.date2num(times.min()),
-                mdates.date2num(times.max()),
-                0, 1,
-            ],
-            vmin=0,
-            vmax=1,
-        )
-
+        ax_loss.set_ylim(0, 1)
         ax_loss.set_yticks([])
         ax_loss.set_ylabel("loss")
         ax_loss.set_xlabel("UTC time")
 
+        # Force identical x-limits as RTT panel
+        ax_loss.set_xlim(ax_rtt.get_xlim())
+
         ax_loss.set_title(f"Packet loss intensity (bin = {loss_bin_s}s)")
         ax_loss.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
+
 
         fig.autofmt_xdate()
         plt.pause(0.01)

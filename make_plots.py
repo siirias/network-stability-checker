@@ -53,7 +53,6 @@ def load_data(days: Optional[int]) -> pd.DataFrame:
 # -----------------------------
 # Figure 1: time series
 # -----------------------------
-
 def plot_timeseries(df: pd.DataFrame):
     fig, (ax_rtt, ax_loss) = plt.subplots(
         2, 1, figsize=(14, 6),
@@ -61,7 +60,9 @@ def plot_timeseries(df: pd.DataFrame):
         gridspec_kw={"height_ratios": [4, 1]}
     )
 
+    # -----------------------------
     # RTT plot
+    # -----------------------------
     for target, g in df.groupby("target"):
         ok = g["ok"] == 1
         rtt = g.loc[ok, "value_ms"].clip(upper=RTT_CAP)
@@ -81,35 +82,42 @@ def plot_timeseries(df: pd.DataFrame):
     ax_rtt.grid(True, alpha=0.3)
     ax_rtt.legend()
 
-    # Loss strip
+    # -----------------------------
+    # Loss strip (FIXED VERSION)
+    # -----------------------------
     df_loss = df.copy()
     df_loss["fail"] = (df_loss["ok"] == 0).astype(int)
     df_loss["bin"] = df_loss["ts_utc"].dt.floor(f"{LOSS_BIN_S}s")
 
-    loss_rate = df_loss.groupby("bin")["fail"].mean()
-
-    ax_loss.imshow(
-        loss_rate.values.reshape(1, -1),
-        aspect="auto",
-        cmap="gray_r",
-        vmin=0,
-        vmax=1,
-        extent=[
-            mdates.date2num(loss_rate.index.min()),
-            mdates.date2num(loss_rate.index.max()),
-            0, 1,
-        ],
+    loss_rate = (
+        df_loss.groupby("bin")["fail"]
+        .mean()
+        .sort_index()
     )
 
+    # Draw only bins that actually exist
+    for t, frac in loss_rate.items():
+        if frac > 0:
+            ax_loss.axvspan(
+                t,
+                t + pd.Timedelta(seconds=LOSS_BIN_S),
+                color="black",
+                alpha=float(frac),
+                linewidth=0
+            )
+
+    ax_loss.set_ylim(0, 1)
     ax_loss.set_yticks([])
     ax_loss.set_ylabel("loss")
     ax_loss.set_xlabel("UTC time")
+
+    # Force identical x-limits for both panels
+    ax_loss.set_xlim(ax_rtt.get_xlim())
 
     fig.autofmt_xdate()
     fig.tight_layout()
     fig.savefig(REPORT_DIR / "timeseries_rtt_loss.png", dpi=150)
     plt.close(fig)
-
 
 # -----------------------------
 # Figure 2: diurnal pattern
