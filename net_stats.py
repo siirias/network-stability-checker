@@ -154,7 +154,16 @@ def print_definitions(loss_bin_s: int, peak_start: int, peak_end: int, outage_mi
 
 
 def summarize(df: pd.DataFrame, loss_bin_s: int, peak_start: int, peak_end: int, outage_min_s: int):
-    bins = compute_bins(df, loss_bin_s)
+    # Split local vs upstream targets
+    df = df.copy()
+    df["is_private_target"] = df["target"].astype(str).apply(is_private_ip)
+
+    df_local = df[df["is_private_target"]]
+    df_net   = df[~df["is_private_target"]]
+
+    # Compute bins separately
+    bins = compute_bins(df_net, loss_bin_s)          # main analysis = upstream
+    bins_local = compute_bins(df_local, loss_bin_s)  # diagnostic only
     if bins.empty:
         print("No data in selected time range.")
         return
@@ -184,15 +193,20 @@ def summarize(df: pd.DataFrame, loss_bin_s: int, peak_start: int, peak_end: int,
     rtt_median = float(rtt.median()) if len(rtt) else np.nan
     rtt_p95 = float(np.percentile(rtt, 95)) if len(rtt) else np.nan
 
-    # Local (private) vs public loss, using per-ping attempts
-    d = df.copy()
-    d["is_private_target"] = d["target"].astype(str).apply(is_private_ip)
+ 
+    # --- Local vs upstream reliability ---
+    local_loss = (df_local["ok"] == 0).mean() * 100.0 if len(df_local) else np.nan
+    net_loss   = (df_net["ok"] == 0).mean() * 100.0 if len(df_net) else np.nan
 
-    private = d[d["is_private_target"]]
-    public = d[~d["is_private_target"]]
+    print("Layer comparison")
+    print(f"  Local network loss   : {local_loss:.2f}%")
+    print(f"  Upstream network loss: {net_loss:.2f}%")
+    print()
 
-    private_loss = (private["ok"] == 0).mean() * 100.0 if len(private) else np.nan
-    public_loss = (public["ok"] == 0).mean() * 100.0 if len(public) else np.nan
+    # Interpretation hint
+    if local_loss < 1 and net_loss > local_loss * 2:
+        print("Likely issue location: beyond the local router (ISP path)\n")
+
 
     # Print
     print_definitions(loss_bin_s, peak_start, peak_end, outage_min_s)
@@ -224,9 +238,10 @@ def summarize(df: pd.DataFrame, loss_bin_s: int, peak_start: int, peak_end: int,
     print(f"  median RTT: {rtt_median:.1f} ms")
     print(f"  p95 RTT:    {rtt_p95:.1f} ms\n")
 
-    print("Loss comparison (per-ping attempts)")
-    print(f"  private-target loss: {private_loss:.2f}%")
-    print(f"  public-target loss : {public_loss:.2f}%")
+    print("Layer comparison (per-ping attempts)")
+    print(f"  Local network loss   : {local_loss:.2f}%")
+    print(f"  Upstream network loss: {net_loss:.2f}%")
+
     print("\n=======================================\n")
 
     return bins  # for hourly report

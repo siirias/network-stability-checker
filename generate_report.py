@@ -46,10 +46,10 @@ def run_stats():
 
 def build_html(stats_text: str):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
-    target_lines = ""
+    target_lines = "<ul>"
     for i in TARGET_DESCRIPTIONS:
         target_lines += f"<li><b>{i}</b> — {TARGET_DESCRIPTIONS[i]}</li>\n"
-    
+    target_lines +="</ul>\n"
     html = f"""
 <!DOCTYPE html>
 <html>
@@ -105,8 +105,13 @@ img {{
 This report summarizes measured network reliability based on continuous ping monitoring.
 Multiple external targets were tested once per second.
 Servers used for this test:
+<p>
 {target_lines}
+</p>
+Local router pings are analysed separately to distinguish
+Wi-Fi/router issues from upstream ISP connectivity problems.
 Loss above ~20–30% typically renders interactive applications unusable.
+
 </p>
 <pre>{stats_text}</pre>
 </div>
